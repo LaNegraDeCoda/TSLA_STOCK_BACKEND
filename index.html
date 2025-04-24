@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TSLA Stock Data Viewer</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+    body { font-family: sans-serif; padding: 20px; background: #f4f4f4; }
+    select, button { padding: 6px 10px; margin-right: 10px; }
+    pre, canvas { background: #222; color: #0f0; padding: 10px; overflow: auto; max-height: 500px; }
+    #chart-container { background: #fff; padding: 20px; border-radius: 8px; }
+    </style>
+</head>
+<body>
+  <h1>TSLA Stock Data</h1>
+  <select id="timeframe">
+    <option value="TIME_SERIES_DAILY">Daily</option>
+    <option value="TIME_SERIES_WEEKLY">Weekly</option>
+    <option value="TIME_SERIES_MONTHLY">Monthly</option>
+    <option value="TIME_SERIES_INTRADAY">Intraday (5min)</option>
+  </select>
+  <button id="fetchData">Fetch Data</button>
+  <label>
+    Refresh every
+    <input type="number" id="refreshInterval" value="0" style="width: 60px;" />
+    min
+  </label>
+  <pre id="output">Select a timeframe and click Fetch Data...</pre>
+  <div id="chart-container">
+    <canvas id="stockChart"></canvas>
+  </div>
+
+  <script>
+    const SYMBOL = "TSLA";
+    const output = document.getElementById("output");
+    const timeframeSelect = document.getElementById("timeframe");
+    const fetchBtn = document.getElementById("fetchData");
+    const refreshInput = document.getElementById("refreshInterval");
+    const ctx = document.getElementById('stockChart').getContext('2d');
+    let stockChart;
+    let refreshIntervalID;
+
+    function parseStockData(data, timeframe) {
+      const metaKey = Object.keys(data).find(k => k.includes("Meta Data"));
+      const timeSeriesKey = Object.keys(data).find(k => k.includes("Time Series"));
+      const timeSeries = data[timeSeriesKey];
+
+      const parsed = Object.entries(timeSeries).map(([timestamp, prices]) => ({
+        timestamp,
+        open: parseFloat(prices["1. open"]),
+        high: parseFloat(prices["2. high"]),
+        low: parseFloat(prices["3. low"]),
+        close: parseFloat(prices["4. close"])
+      })).slice(0, 100).reverse(); // limit to 100 data points for charting
+
+      return parsed;
+    }
+
+    function updateChart(parsedData) {
+      const labels = parsedData.map(d => d.timestamp);
+      const closePrices = parsedData.map(d => d.close);
+
+      if (stockChart) stockChart.destroy();
+
+      stockChart = new Chart(ctx, {
+        type: 'line',
+        data: {
+          labels,
+          datasets: [{
+            label: 'TSLA Close Price',
+            data: closePrices,
+            borderColor: 'rgba(75, 192, 192, 1)',
+            borderWidth: 2,
+            fill: false,
+            tension: 0.1
+          }]
+        },
+        options: {
+          responsive: true,
+          scales: {
+            x: { display: false },
+            y: { beginAtZero: false }
+          }
+        }
+      });
+    }
+
+    function displayParsedData(parsed) {
+      output.textContent = parsed.map(p => 
+        `Time: ${p.timestamp}\nOpen: ${p.open}\nHigh: ${p.high}\nLow: ${p.low}\nClose: ${p.close}\n---`
+      ).join("\n");
+    }
+
+    function fetchStockData() {
+      const timeframe = timeframeSelect.value;
+      const query = new URLSearchParams({ function: timeframe, symbol: SYMBOL }).toString();
+      let endpoint = `/api/function?${query}`;
+
+      if (timeframe === "TIME_SERIES_INTRADAY") {
+        endpoint += "&interval=5min&outputsize=full";
+      }
+
+      fetch(endpoint)
+        .then(res => res.json())
+        .then(data => {
+          const parsed = parseStockData(data, timeframe);
+          displayParsedData(parsed);
+          updateChart(parsed);
+        })
+        .catch(err => {
+          output.textContent = `Error fetching data: ${err}`;
+        });
+    }
+
+    fetchBtn.addEventListener("click", () => {
+      clearInterval(refreshIntervalID);
+      fetchStockData();
+
+      const minutes = parseInt(refreshInput.value, 10);
+      if (minutes > 0) {
+        refreshIntervalID = setInterval(fetchStockData, minutes * 60 * 1000);
+      }
+    });
+  </script>
+</body>
+</html>
